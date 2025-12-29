@@ -5,11 +5,26 @@
 #include <vector>
 #include <unistd.h>
 #include <sys/stat.h>
-#include<sys/wait.h>
-#include<cstring>
-
+#include <sys/types.h>
+#include <limits.h>
+#include <sys/wait.h>
+#include <cstring>
+#include <fcntl.h>
+#include <termios.h>
 
 using namespace std;
+
+struct termios orig;
+
+void enableRawMode(){
+  tcgetattr(STDIN_FILENO,& orig);
+  struct termios raw = orig;
+  raw.c_lflag &= ~(ICANON | ECHO); 
+  tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+}
+void disableRawMode() {
+    tcsetattr(STDIN_FILENO, TCSANOW, &orig);
+}
 
 void run_external(char* argv[]){
   pid_t pid= fork();
@@ -58,11 +73,50 @@ int main() {
   // TODO: Uncomment the code below to pass the first stage
 
   string command;
- 
+  int saved_stdout=dup(STDOUT_FILENO);
+  int saved_error=dup(STDERR_FILENO);
+
+
   while(true)
   {
-    cout<<"$ ";
-    getline(cin,command);
+     dup2(saved_stdout,STDOUT_FILENO);
+     
+     dup2(saved_error,STDERR_FILENO);
+  
+   cout << "$ " << flush;
+      string buffer;
+char c;
+enableRawMode();
+
+
+while (read(STDIN_FILENO, &c, 1) == 1) {
+
+    if (c == '\n') {
+        cout << "\n";
+        break;
+    }
+
+    
+    if (c == '\t') {
+        if (buffer == "ech") {
+            cout << "\r$ echo "<<flush ;
+            buffer = "echo ";
+        } else if (buffer == "exi") {
+            cout << "\r$ exit " << flush;
+            buffer = "exit ";
+        }
+        else
+        cout<<'\a'<<flush;
+        continue;
+    }
+
+    buffer.push_back(c);
+    cout << c << flush;
+}
+
+disableRawMode();
+
+    command=buffer;
    string current="";
    vector<string> arg;
    bool isq=false;
@@ -125,6 +179,58 @@ int main() {
    if(!current.empty()){
   arg.push_back(current);
    }
+  
+    string file_out;
+    string file_error;
+    string file_append;
+    vector<string> arg_cpy;
+    for(int i=0;i<(int)arg.size();i++){
+      if(arg[i]==">>"||arg[i]=="1>>")
+      {
+           if(i+1<(int)arg.size())
+           {
+              file_append=arg[i+1];i++;
+              int fd= open(file_append.c_str(),O_WRONLY|O_CREAT|O_APPEND,0644);
+              dup2(fd,STDOUT_FILENO);
+              close(fd);
+              continue;
+           }
+      }
+      else if(arg[i]=="2>>")
+      {
+        
+              file_append=arg[i+1];i++;
+              int fd= open(file_append.c_str(),O_WRONLY|O_CREAT|O_APPEND,0644);
+              dup2(fd,STDERR_FILENO);
+              close(fd);
+              continue;
+      }
+      else if(arg[i]=="2>")
+      {
+        if(i+1<(int)arg.size()){
+          file_error=arg[i+1];i++;
+          int fd = open(file_error.c_str(),O_WRONLY|O_CREAT|O_TRUNC,0644);
+          dup2(fd,STDERR_FILENO);
+          close(fd);
+          continue;
+        }
+      }
+      else if(arg[i]==">"||arg[i]=="1>"){
+        if(i+1<(int)arg.size()){
+           file_out= arg[i+1];i++;
+           int fd = open(file_out.c_str(),O_WRONLY|O_CREAT|O_TRUNC,0644);
+           dup2(fd,STDOUT_FILENO);
+           close(fd);
+          continue;
+        }else{
+          cout<<"bash: syntax error near unexpected token newline"<<"\n";
+          continue;
+        }
+
+      }
+      arg_cpy.push_back(arg[i]);
+    }
+    swap(arg,arg_cpy);
    
   
 
@@ -136,7 +242,6 @@ int main() {
       if(i!=(int)arg.size()-1)
       target+=" ";
     }
-   
     if(arg[0]=="exit")
     break;
     else if(arg[0]=="type")
