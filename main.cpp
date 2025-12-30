@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <cstring>
 #include <fcntl.h>
+#include <dirent.h>
 #include <termios.h>
 
 using namespace std;
@@ -65,12 +66,46 @@ string find_in_path(const string &cmd)
   }
   return "";
 }
+bool startsWith(const string& s, const string& prefix){
+  return s.rfind(prefix,0)==0;
+}
+string completeCommand(const string& buffer){
+  if(buffer.find(' ')!=string::npos) return buffer;
+  char* pathEnv=getenv("PATH");
+  if(!pathEnv) return buffer;
+  vector<string> matches;
+  string prefix = buffer;
+  string path(pathEnv);
+
+  stringstream ss(path);
+  string dir;
+  while(getline(ss,dir,':')){
+    DIR* d= opendir(dir.c_str());
+    if(!d) continue;
+    dirent* entry;
+    while((entry=readdir(d))!=nullptr){
+      string name = entry->d_name;
+      if(!startsWith(name,prefix))continue;
+      string fullPath = dir+"/"+name;
+      if(access(fullPath.c_str(),X_OK)==0){
+        matches.push_back(name);
+      }
+    }
+    closedir(d);
+  }
+  if(matches.size()==1){
+    cout<<"\r$ "<<matches[0]<<" ";
+    cout.flush();
+    return matches[0]+" ";
+  }
+     return buffer;
+}
 int main() {
-  // Flush after every std::cout / std:cerr
+  
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
   
-  // TODO: Uncomment the code below to pass the first stage
+  
 
   string command;
   int saved_stdout=dup(STDOUT_FILENO);
@@ -105,8 +140,13 @@ while (read(STDIN_FILENO, &c, 1) == 1) {
             cout << "\r$ exit " << flush;
             buffer = "exit ";
         }
+        else if(buffer!=completeCommand(buffer))
+        {
+          buffer=completeCommand(buffer);
+        }
         else
         cout<<'\a'<<flush;
+        
         continue;
     }
 
